@@ -1,0 +1,89 @@
+/* 1.Which category of family movie is watched the most ? */
+
+/* using aggregation, window function and JOINs */
+
+SELECT DISTINCT c.name AS category_name,
+       COUNT(r.rental_id) OVER (PARTITION BY c.name)AS rental_count
+FROM category c
+JOIN film_category fc
+ON c.category_id = fc.category_id
+JOIN film f
+ON fc.film_id = f.film_id
+JOIN inventory i
+ON f.film_id = i.film_id
+JOIN rental r
+ON i.inventory_id = r.inventory_id
+WHERE c.name IN ('Animation', 'Children', 'Classics', 'Comedy', 'Family','Music')
+ORDER BY 1;
+
+
+/* 2. Query to find how the number of rental orders change over time between 2 stores every month? */
+
+/* using aggregation, Sub-query, DATE_PART function and JOINs */
+
+SELECT (Rental_year||'-'||'0'||Rental_month) AS Rental_year_month, store_id,
+COUNT(rental_id) AS Count_rentals
+FROM (SELECT DATE_PART('month',r.rental_date) AS           Rental_month, 
+      DATE_PART('year',r.rental_date) AS                   Rental_year,
+      s.store_id, r.rental_id
+      FROM rental r
+      JOIN inventory i
+      ON r.inventory_id=i.inventory_id
+      JOIN store s
+      ON i.store_id=s.store_id
+      ORDER BY 1,2,3)t1
+GROUP BY 1,2
+ORDER BY 2;
+
+
+
+/* 3. Who are the top 10 paying Customers in 2007 ? */
+
+/* using CTE, aggregation, DATE_PART and CONCAT functions and JOINs */
+
+WITH sum AS(SELECT customer_id, SUM(amount) AS total
+            FROM payment
+            WHERE DATE_PART('year',payment_date)=2007
+            GROUP BY customer_id
+            ORDER BY total DESC
+            LIMIT 10)
+
+SELECT CONCAT(c.first_name,' ',c.last_name)AS customer_name, s.total AS total_payment
+FROM customer c
+JOIN sum s
+ON c.customer_id = s.customer_id
+ORDER BY 1,2 DESC;
+
+/* 4. Query to find Top 10 customers and the maximum difference they paid in terms of payment in 2007 ? */
+
+/* using CTE, aggregation, sub-query, CONCAT, DATE_TRUNC, DATE_PART, LAG, window functions and JOINs */
+
+WITH s1 AS (SELECT customer_id, pay_mon, fullname, COUNT(pay_mon) AS pay_countpermon,
+            SUM(amount)AS pay_amount
+            FROM (SELECT p.customer_id,CONCAT(c.first_name,' ',c.last_name) AS fullname,
+                  DATE_TRUNC('month',p.payment_date) AS pay_mon,p.amount
+                  FROM customer c
+                  JOIN payment p
+                  ON c.customer_id = p.customer_id
+                  WHERE DATE_PART('year',p.payment_date) = 2007
+                  )t2
+            GROUP BY 1,2,3),
+
+top_10 AS (SELECT customer_id, SUM(amount) AS total
+           FROM payment
+           WHERE DATE_PART('year',payment_date)=2007
+           GROUP BY customer_id
+           ORDER BY total DESC
+           LIMIT 10)
+
+SELECT fullname, MAX(lag_difference) AS max_lag_difference
+FROM (SELECT s1.pay_mon, s1.fullname, s1.pay_countpermon, s1.pay_amount,
+      LAG(s1.pay_amount) OVER (PARTITION BY s1.fullname ORDER BY s1.pay_mon) AS lag,
+      (s1.pay_amount - LAG(s1.pay_amount) OVER (PARTITION BY s1.fullname ORDER BY s1.pay_mon))AS lag_difference
+      FROM s1
+      JOIN top_10 s2
+      ON s1.customer_id = s2.customer_id
+      ORDER BY s1.fullname, s1.pay_mon
+     )s3
+GROUP BY fullname
+ORDER BY fullname;
